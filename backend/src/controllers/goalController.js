@@ -1,192 +1,218 @@
-let goals = [];
+const mongoose = require("mongoose");
 
-let nextId = 1;
+const Goal = require("../models/Goal");
 
-function createGoal(req, res) {
-  const { title, description = "", targetDays } = req.body;
+const { validateCreateGoal } = require("../utils/goalValidation");
 
-  if (typeof title !== "string" || title.trim() === "") {
-    return res.status(400).json({
-      success: false,
-      message: "Goal title is required"
-    });
-  }
+// CREATE a new goal
+async function createGoal(req, res, next) {
+  try {
+    const errors = validateCreateGoal(req.body);
 
-  if (
-    targetDays !== undefined &&
-    (!Number.isInteger(targetDays) || targetDays < 1)
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "targetDays must be a positive integer"
-    });
-  }
-
-  const goal = {
-    id: String(nextId++),
-    title: title.trim(),
-    description:
-      typeof description === "string" ? description.trim() : "",
-    targetDays: targetDays ?? null,
-    completed: false,
-    createdAt: new Date().toISOString()
-  };
-
-  goals.push(goal);
-
-  return res.status(201).json({
-    success: true,
-    message: "Goal created successfully",
-    goal
-  });
-}
-
-function getAllGoals(req, res) {
-  let result = [...goals];
-
-  if (req.query.completed !== undefined) {
-    if (
-      req.query.completed !== "true" &&
-      req.query.completed !== "false"
-    ) {
+    if (errors.length > 0) {
       return res.status(400).json({
         success: false,
-        message: "completed must be true or false"
+        message: "Validation failed",
+        errors,
       });
     }
 
-    const completed = req.query.completed === "true";
+    const goal = await Goal.create({
+      title: req.body.title,
+      description: req.body.description,
+      targetDays: req.body.targetDays,
+    });
 
-    result = result.filter((goal) => goal.completed === completed);
+    return res.status(201).json({
+      success: true,
+      message: "Goal created successfully",
+      data: goal,
+    });
+  } catch (error) {
+    next(error);
   }
-
-  return res.status(200).json({
-    success: true,
-    count: result.length,
-    goals: result
-  });
 }
 
-function getGoalById(req, res) {
-  const goal = goals.find((item) => item.id === req.params.id);
+// READ all goals
+async function getAllGoals(req, res, next) {
+  try {
+    const filter = {};
 
-  if (!goal) {
-    return res.status(404).json({
-      success: false,
-      message: "Goal not found"
+    if (req.query.completed !== undefined) {
+      if (!["true", "false"].includes(req.query.completed)) {
+        return res.status(400).json({
+          success: false,
+          message: "The completed query parameter must be true or false",
+        });
+      }
+
+      filter.completed = req.query.completed === "true";
+    }
+
+    const goals = await Goal.find(filter).sort({ createdAt: -1 });
+
+    return res.status(200).json({
+      success: true,
+      count: goals.length,
+      data: goals,
     });
+  } catch (error) {
+    next(error);
   }
-
-  return res.status(200).json({
-    success: true,
-    goal
-  });
 }
 
-function updateGoal(req, res) {
-  const goal = goals.find((item) => item.id === req.params.id);
+// READ one goal by ID
+async function getGoalById(req, res, next) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid goal ID",
+      });
+    }
 
-  if (!goal) {
-    return res.status(404).json({
-      success: false,
-      message: "Goal not found"
+    const goal = await Goal.findById(req.params.id);
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      data: goal,
     });
+  } catch (error) {
+    next(error);
   }
-
-  const allowedFields = ["title", "description", "targetDays", "completed"];
-  const updates = req.body;
-  const updateKeys = Object.keys(updates);
-
-  if (
-    updateKeys.length === 0 ||
-    updateKeys.some((key) => !allowedFields.includes(key))
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "Provide valid goal fields to update"
-    });
-  }
-
-  if (
-    "title" in updates &&
-    (typeof updates.title !== "string" || updates.title.trim() === "")
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "Title must be a non-empty string"
-    });
-  }
-
-  if (
-    "description" in updates &&
-    typeof updates.description !== "string"
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "Description must be a string"
-    });
-  }
-
-  if (
-    "targetDays" in updates &&
-    (!Number.isInteger(updates.targetDays) || updates.targetDays < 1)
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "targetDays must be a positive integer"
-    });
-  }
-
-  if (
-    "completed" in updates &&
-    typeof updates.completed !== "boolean"
-  ) {
-    return res.status(400).json({
-      success: false,
-      message: "completed must be a Boolean"
-    });
-  }
-
-  if ("title" in updates) {
-    goal.title = updates.title.trim();
-  }
-
-  if ("description" in updates) {
-    goal.description = updates.description.trim();
-  }
-
-  if ("targetDays" in updates) {
-    goal.targetDays = updates.targetDays;
-  }
-
-  if ("completed" in updates) {
-    goal.completed = updates.completed;
-  }
-
-  return res.status(200).json({
-    success: true,
-    message: "Goal updated successfully",
-    goal
-  });
 }
 
-function deleteGoal(req, res) {
-  const index = goals.findIndex((item) => item.id === req.params.id);
+// UPDATE a goal
+async function updateGoal(req, res, next) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid goal ID",
+      });
+    }
 
-  if (index === -1) {
-    return res.status(404).json({
-      success: false,
-      message: "Goal not found"
+    const allowedFields = ["title", "description", "targetDays", "completed"];
+
+    const updates = {};
+    const errors = [];
+
+    for (const field of Object.keys(req.body)) {
+      if (!allowedFields.includes(field)) {
+        errors.push(`Field '${field}' cannot be updated`);
+        continue;
+      }
+
+      const value = req.body[field];
+
+      if (field === "title") {
+        if (typeof value !== "string" || value.trim() === "") {
+          errors.push("Goal title must be a non-empty string");
+        } else {
+          updates.title = value.trim();
+        }
+      }
+
+      if (field === "description") {
+        if (typeof value !== "string") {
+          errors.push("Description must be a string");
+        } else {
+          updates.description = value.trim();
+        }
+      }
+
+      if (field === "targetDays") {
+        if (!Number.isInteger(value) || value < 1) {
+          errors.push("targetDays must be a positive integer");
+        } else {
+          updates.targetDays = value;
+        }
+      }
+
+      if (field === "completed") {
+        if (typeof value !== "boolean") {
+          errors.push("completed must be true or false");
+        } else {
+          updates.completed = value;
+        }
+      }
+    }
+
+    if (errors.length > 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Validation failed",
+        errors,
+      });
+    }
+
+    if (Object.keys(updates).length === 0) {
+      return res.status(400).json({
+        success: false,
+        message: "Provide at least one valid field to update",
+      });
+    }
+
+    const goal = await Goal.findByIdAndUpdate(
+      req.params.id,
+      updates,
+      {
+        new: true,
+        runValidators: true,
+      }
+    );
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Goal updated successfully",
+      data: goal,
     });
+  } catch (error) {
+    next(error);
   }
+}
 
-  const deletedGoal = goals.splice(index, 1)[0];
+// DELETE a goal
+async function deleteGoal(req, res, next) {
+  try {
+    if (!mongoose.isValidObjectId(req.params.id)) {
+      return res.status(400).json({
+        success: false,
+        message: "Invalid goal ID",
+      });
+    }
 
-  return res.status(200).json({
-    success: true,
-    message: "Goal deleted successfully",
-    goal: deletedGoal
-  });
+    const goal = await Goal.findByIdAndDelete(req.params.id);
+
+    if (!goal) {
+      return res.status(404).json({
+        success: false,
+        message: "Goal not found",
+      });
+    }
+
+    return res.status(200).json({
+      success: true,
+      message: "Goal deleted successfully",
+      data: goal,
+    });
+  } catch (error) {
+    next(error);
+  }
 }
 
 module.exports = {
@@ -194,5 +220,5 @@ module.exports = {
   getAllGoals,
   getGoalById,
   updateGoal,
-  deleteGoal
+  deleteGoal,
 };

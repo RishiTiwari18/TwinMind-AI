@@ -7,14 +7,13 @@ const {
   getAllGoals,
   getGoalById,
   updateGoal,
-  deleteGoal
+  deleteGoal,
 } = require("../controllers/goalController");
 
-router.route("/")
-  .post(createGoal)
-  .get(getAllGoals);
+router.route("/").post(createGoal).get(getAllGoals);
 
-router.route("/:id")
+router
+  .route("/:id")
   .get(getGoalById)
   .patch(updateGoal)
   .delete(deleteGoal);
