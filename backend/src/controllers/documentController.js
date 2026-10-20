@@ -10,7 +10,7 @@ const uploadDirectory = path.resolve(
   "../../uploads/documents"
 );
 
-// Upload document and extract its text
+// Upload a document and extract its text
 async function uploadDocument(req, res, next) {
   try {
     if (!req.file) {
@@ -20,13 +20,11 @@ async function uploadDocument(req, res, next) {
       });
     }
 
-    // Extract text from the uploaded file
     const extractedText = await extractDocumentText(
       req.file.path,
       req.file.mimetype
     );
 
-    // Save document metadata and extracted text
     const savedDocument = await Document.create({
       originalName: req.file.originalname,
       storedName: req.file.filename,
@@ -50,7 +48,6 @@ async function uploadDocument(req, res, next) {
       },
     });
   } catch (error) {
-    // Remove the uploaded file if processing or saving fails
     if (req.file) {
       await fs.unlink(req.file.path).catch(() => {});
     }
@@ -78,7 +75,93 @@ async function getAllDocuments(req, res, next) {
   }
 }
 
-// Get document metadata and extracted text
+// Search documents by filename or extracted text
+async function searchDocuments(req, res, next) {
+  try {
+    const query = req.query.q;
+
+    if (typeof query !== "string" || query.trim() === "") {
+      return res.status(400).json({
+        success: false,
+        message:
+          "Please provide a search query using the q parameter",
+      });
+    }
+
+    const searchTerm = query.trim();
+
+    if (searchTerm.length > 100) {
+      return res.status(400).json({
+        success: false,
+        message: "Search query cannot exceed 100 characters",
+      });
+    }
+
+    let limit = 10;
+
+    if (req.query.limit !== undefined) {
+      const rawLimit = req.query.limit;
+
+      if (
+        typeof rawLimit !== "string" ||
+        !/^\d+$/.test(rawLimit)
+      ) {
+        return res.status(400).json({
+          success: false,
+          message: "Limit must be a positive integer",
+        });
+      }
+
+      limit = Number(rawLimit);
+
+      if (limit < 1 || limit > 50) {
+        return res.status(400).json({
+          success: false,
+          message: "Limit must be between 1 and 50",
+        });
+      }
+    }
+
+    // Treat user input as literal text, not a regex pattern
+    const escapedQuery = searchTerm.replace(
+      /[.*+?^${}()|[\]\\]/g,
+      "\\$&"
+    );
+
+    const documents = await Document.find({
+      user: req.user.id,
+      $or: [
+        {
+          originalName: {
+            $regex: escapedQuery,
+            $options: "i",
+          },
+        },
+        {
+          extractedText: {
+            $regex: escapedQuery,
+            $options: "i",
+          },
+        },
+      ],
+    })
+      .select("-extractedText")
+      .sort({ createdAt: -1 })
+      .limit(limit);
+
+    return res.status(200).json({
+      success: true,
+      query: searchTerm,
+      count: documents.length,
+      limit,
+      data: documents,
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+// Get one document and its extracted text
 async function getDocumentById(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -150,7 +233,7 @@ async function downloadDocument(req, res, next) {
   }
 }
 
-// Delete document and its stored file
+// Delete a document and its stored file
 async function deleteDocument(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -177,10 +260,8 @@ async function deleteDocument(req, res, next) {
       document.storedName
     );
 
-    // Delete the stored file first
     await fs.unlink(filePath);
 
-    // Delete its metadata from MongoDB
     await Document.deleteOne({
       _id: document._id,
       user: req.user.id,
@@ -206,6 +287,7 @@ async function deleteDocument(req, res, next) {
 module.exports = {
   uploadDocument,
   getAllDocuments,
+  searchDocuments,
   getDocumentById,
   downloadDocument,
   deleteDocument,
