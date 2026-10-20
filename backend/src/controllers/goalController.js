@@ -4,7 +4,7 @@ const Goal = require("../models/Goal");
 
 const { validateCreateGoal } = require("../utils/goalValidation");
 
-// CREATE a new goal
+// CREATE a goal belonging to the logged-in user
 async function createGoal(req, res, next) {
   try {
     const errors = validateCreateGoal(req.body);
@@ -21,6 +21,7 @@ async function createGoal(req, res, next) {
       title: req.body.title,
       description: req.body.description,
       targetDays: req.body.targetDays,
+      user: req.user.id,
     });
 
     return res.status(201).json({
@@ -33,10 +34,12 @@ async function createGoal(req, res, next) {
   }
 }
 
-// READ all goals
+// READ goals belonging only to the logged-in user
 async function getAllGoals(req, res, next) {
   try {
-    const filter = {};
+    const filter = {
+      user: req.user.id,
+    };
 
     if (req.query.completed !== undefined) {
       if (!["true", "false"].includes(req.query.completed)) {
@@ -49,7 +52,9 @@ async function getAllGoals(req, res, next) {
       filter.completed = req.query.completed === "true";
     }
 
-    const goals = await Goal.find(filter).sort({ createdAt: -1 });
+    const goals = await Goal.find(filter).sort({
+      createdAt: -1,
+    });
 
     return res.status(200).json({
       success: true,
@@ -61,7 +66,7 @@ async function getAllGoals(req, res, next) {
   }
 }
 
-// READ one goal by ID
+// READ one goal only if the logged-in user owns it
 async function getGoalById(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -71,7 +76,10 @@ async function getGoalById(req, res, next) {
       });
     }
 
-    const goal = await Goal.findById(req.params.id);
+    const goal = await Goal.findOne({
+      _id: req.params.id,
+      user: req.user.id,
+    });
 
     if (!goal) {
       return res.status(404).json({
@@ -89,7 +97,7 @@ async function getGoalById(req, res, next) {
   }
 }
 
-// UPDATE a goal
+// UPDATE a goal only if the logged-in user owns it
 async function updateGoal(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -99,7 +107,12 @@ async function updateGoal(req, res, next) {
       });
     }
 
-    const allowedFields = ["title", "description", "targetDays", "completed"];
+    const allowedFields = [
+      "title",
+      "description",
+      "targetDays",
+      "completed",
+    ];
 
     const updates = {};
     const errors = [];
@@ -160,8 +173,11 @@ async function updateGoal(req, res, next) {
       });
     }
 
-    const goal = await Goal.findByIdAndUpdate(
-      req.params.id,
+    const goal = await Goal.findOneAndUpdate(
+      {
+        _id: req.params.id,
+        user: req.user.id,
+      },
       updates,
       {
         new: true,
@@ -186,7 +202,7 @@ async function updateGoal(req, res, next) {
   }
 }
 
-// DELETE a goal
+// DELETE a goal only if the logged-in user owns it
 async function deleteGoal(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -196,7 +212,10 @@ async function deleteGoal(req, res, next) {
       });
     }
 
-    const goal = await Goal.findByIdAndDelete(req.params.id);
+    const goal = await Goal.findOneAndDelete({
+      _id: req.params.id,
+      user: req.user.id,
+    });
 
     if (!goal) {
       return res.status(404).json({
