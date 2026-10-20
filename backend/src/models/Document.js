@@ -32,6 +32,11 @@ const documentSchema = new mongoose.Schema(
       max: [5 * 1024 * 1024, "File cannot exceed 5 MiB"],
     },
 
+    extractedText: {
+      type: String,
+      default: "",
+    },
+
     user: {
       type: mongoose.Schema.Types.ObjectId,
       ref: "User",
