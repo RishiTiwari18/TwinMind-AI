@@ -10,6 +10,7 @@ const authRoutes = require("./routes/authRoutes");
 const taskRoutes = require("./routes/taskRoutes");
 const noteRoutes = require("./routes/noteRoutes");
 const documentRoutes = require("./routes/documentRoutes");
+const userRoutes = require("./routes/userRoutes");
 
 
 const app = express();
@@ -30,6 +31,7 @@ app.use("/api/auth", authRoutes);
 app.use("/api/tasks", taskRoutes);
 app.use("/api/notes", noteRoutes);
 app.use("/api/documents", documentRoutes);
+app.use("/api/users", userRoutes);
 
 app.use((req, res) => {
   res.status(404).json({

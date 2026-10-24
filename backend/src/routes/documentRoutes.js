@@ -23,7 +23,7 @@ router.post("/", upload.single("document"), uploadDocument);
 // Get all documents belonging to the logged-in user
 router.get("/", getAllDocuments);
 
-// Search documents by filename or extracted text
+// Search documents and return text snippets
 router.get("/search", searchDocuments);
 
 // Download the original document

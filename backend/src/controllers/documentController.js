@@ -75,7 +75,7 @@ async function getAllDocuments(req, res, next) {
   }
 }
 
-// Search documents by filename or extracted text
+// Search documents and return a matching text snippet
 async function searchDocuments(req, res, next) {
   try {
     const query = req.query.q;
@@ -122,12 +122,13 @@ async function searchDocuments(req, res, next) {
       }
     }
 
-    // Treat user input as literal text, not a regex pattern
+    // Escape regex special characters in the search term
     const escapedQuery = searchTerm.replace(
       /[.*+?^${}()|[\]\\]/g,
       "\\$&"
     );
 
+    // Find only the current user's matching documents
     const documents = await Document.find({
       user: req.user.id,
       $or: [
@@ -147,14 +148,70 @@ async function searchDocuments(req, res, next) {
     })
       .select("-extractedText")
       .sort({ createdAt: -1 })
-      .limit(limit);
+      .limit(limit)
+      .lean();
+
+    // Build a short preview around the matching text
+    const results = await Promise.all(
+      documents.map(async (document) => {
+        let snippet = "";
+
+        // Search inside the original filename first
+        const filenameMatch = document.originalName
+          .toLowerCase()
+          .indexOf(searchTerm.toLowerCase());
+
+        if (filenameMatch !== -1) {
+          snippet = document.originalName;
+        } else {
+          // Retrieve the extracted text for snippet generation
+          const fullDocument = await Document.findOne({
+            _id: document._id,
+            user: req.user.id,
+          }).select("extractedText");
+
+          const text = fullDocument?.extractedText || "";
+          const matchIndex = text
+            .toLowerCase()
+            .indexOf(searchTerm.toLowerCase());
+
+          if (matchIndex !== -1) {
+            const contextLength = 60;
+
+            const start = Math.max(
+              0,
+              matchIndex - contextLength
+            );
+
+            const end = Math.min(
+              text.length,
+              matchIndex + searchTerm.length + contextLength
+            );
+
+            snippet =
+              (start > 0 ? "..." : "") +
+              text.slice(start, end) +
+              (end < text.length ? "..." : "");
+          }
+        }
+
+        return {
+          id: document._id,
+          originalName: document.originalName,
+          mimeType: document.mimeType,
+          size: document.size,
+          createdAt: document.createdAt,
+          snippet,
+        };
+      })
+    );
 
     return res.status(200).json({
       success: true,
       query: searchTerm,
-      count: documents.length,
+      count: results.length,
       limit,
-      data: documents,
+      data: results,
     });
   } catch (error) {
     next(error);
