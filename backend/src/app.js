@@ -12,6 +12,7 @@ const noteRoutes = require("./routes/noteRoutes");
 const documentRoutes = require("./routes/documentRoutes");
 const userRoutes = require("./routes/userRoutes");
 const documentChunkRoutes = require("./routes/documentChunkRoutes");
+const searchRoutes = require("./routes/searchRoutes");
 
 
 const app = express();
@@ -34,6 +35,7 @@ app.use("/api/notes", noteRoutes);
 app.use("/api/documents", documentRoutes);
 app.use("/api/users", userRoutes);
 app.use("/api/document-chunks", documentChunkRoutes);
+app.use("/api/search", searchRoutes);
 
 app.use((req, res) => {
   res.status(404).json({
