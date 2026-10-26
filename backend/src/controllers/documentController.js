@@ -3,15 +3,23 @@ const path = require("path");
 const mongoose = require("mongoose");
 
 const Document = require("../models/Document");
+const DocumentChunk = require("../models/DocumentChunk");
 const extractDocumentText = require("../utils/extractDocumentText");
+
+const {
+  saveDocumentChunks,
+  deleteDocumentChunks,
+} = require("../services/documentChunkService");
 
 const uploadDirectory = path.resolve(
   __dirname,
   "../../uploads/documents"
 );
 
-// Upload a document and extract its text
+// Upload a document, extract text, and save its chunks
 async function uploadDocument(req, res, next) {
+  let savedDocument = null;
+
   try {
     if (!req.file) {
       return res.status(400).json({
@@ -25,7 +33,7 @@ async function uploadDocument(req, res, next) {
       req.file.mimetype
     );
 
-    const savedDocument = await Document.create({
+    savedDocument = await Document.create({
       originalName: req.file.originalname,
       storedName: req.file.filename,
       mimeType: req.file.mimetype,
@@ -34,22 +42,61 @@ async function uploadDocument(req, res, next) {
       user: req.user.id,
     });
 
+    const chunkResult = await saveDocumentChunks({
+      text: extractedText,
+      documentId: savedDocument._id,
+      userId: req.user.id,
+    });
+
     return res.status(201).json({
       success: true,
-      message: "Document uploaded and text extracted successfully",
+      message: "Document uploaded and processed successfully",
       data: {
         id: savedDocument._id,
         originalName: savedDocument.originalName,
         mimeType: savedDocument.mimeType,
         size: savedDocument.size,
         textLength: savedDocument.extractedText.length,
+        totalChunks: chunkResult.totalChunks,
         extractedText: savedDocument.extractedText,
         createdAt: savedDocument.createdAt,
       },
     });
   } catch (error) {
+    // If the document was saved but chunk creation failed,
+    // remove the partially created database records.
+    if (savedDocument) {
+      await DocumentChunk.deleteMany({
+        document: savedDocument._id,
+        user: req.user.id,
+      }).catch((cleanupError) => {
+        console.error(
+          "Failed to clean up document chunks:",
+          cleanupError.message
+        );
+      });
+
+      await Document.deleteOne({
+        _id: savedDocument._id,
+        user: req.user.id,
+      }).catch((cleanupError) => {
+        console.error(
+          "Failed to clean up document metadata:",
+          cleanupError.message
+        );
+      });
+    }
+
+    // Remove the uploaded file if it exists.
     if (req.file) {
-      await fs.unlink(req.file.path).catch(() => {});
+      await fs.unlink(req.file.path).catch((cleanupError) => {
+        if (cleanupError.code !== "ENOENT") {
+          console.error(
+            "Failed to clean up uploaded file:",
+            cleanupError.message
+          );
+        }
+      });
     }
 
     next(error);
@@ -83,8 +130,7 @@ async function searchDocuments(req, res, next) {
     if (typeof query !== "string" || query.trim() === "") {
       return res.status(400).json({
         success: false,
-        message:
-          "Please provide a search query using the q parameter",
+        message: "Please provide a search query using the q parameter",
       });
     }
 
@@ -122,13 +168,11 @@ async function searchDocuments(req, res, next) {
       }
     }
 
-    // Escape regex special characters in the search term
     const escapedQuery = searchTerm.replace(
       /[.*+?^${}()|[\]\\]/g,
       "\\$&"
     );
 
-    // Find only the current user's matching documents
     const documents = await Document.find({
       user: req.user.id,
       $or: [
@@ -151,12 +195,10 @@ async function searchDocuments(req, res, next) {
       .limit(limit)
       .lean();
 
-    // Build a short preview around the matching text
     const results = await Promise.all(
       documents.map(async (document) => {
         let snippet = "";
 
-        // Search inside the original filename first
         const filenameMatch = document.originalName
           .toLowerCase()
           .indexOf(searchTerm.toLowerCase());
@@ -164,13 +206,13 @@ async function searchDocuments(req, res, next) {
         if (filenameMatch !== -1) {
           snippet = document.originalName;
         } else {
-          // Retrieve the extracted text for snippet generation
           const fullDocument = await Document.findOne({
             _id: document._id,
             user: req.user.id,
           }).select("extractedText");
 
           const text = fullDocument?.extractedText || "";
+
           const matchIndex = text
             .toLowerCase()
             .indexOf(searchTerm.toLowerCase());
@@ -290,7 +332,7 @@ async function downloadDocument(req, res, next) {
   }
 }
 
-// Delete a document and its stored file
+// Delete a document, its chunks, and its stored file
 async function deleteDocument(req, res, next) {
   try {
     if (!mongoose.isValidObjectId(req.params.id)) {
@@ -317,23 +359,54 @@ async function deleteDocument(req, res, next) {
       document.storedName
     );
 
-    await fs.unlink(filePath);
+    // Verify the original file exists before deleting database records.
+    await fs.access(filePath);
 
-    await Document.deleteOne({
+    // Remove the document's chunks first.
+    await deleteDocumentChunks({
+      documentId: document._id,
+      userId: req.user.id,
+    });
+
+    // Delete the document metadata.
+    const deleteResult = await Document.deleteOne({
       _id: document._id,
       user: req.user.id,
     });
 
+    if (deleteResult.deletedCount !== 1) {
+      return res.status(409).json({
+        success: false,
+        message: "Document could not be deleted",
+      });
+    }
+
+    // Remove the original uploaded file.
+    try {
+      await fs.unlink(filePath);
+    } catch (fileError) {
+      console.error(
+        "Document was deleted from MongoDB, but its file could not be removed:",
+        fileError.message
+      );
+
+      return res.status(200).json({
+        success: true,
+        message:
+          "Document and chunks deleted, but the stored file needs cleanup",
+      });
+    }
+
     return res.status(200).json({
       success: true,
-      message: "Document deleted successfully",
+      message: "Document and its chunks deleted successfully",
     });
   } catch (error) {
     if (error.code === "ENOENT") {
       return res.status(500).json({
         success: false,
         message:
-          "Stored file is missing; document metadata was not deleted",
+          "Stored file is missing; document and chunks were not deleted",
       });
     }
 
